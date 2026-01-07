@@ -1,0 +1,9 @@
+../Core/Src/bsp_hlw8032.c:28:17:Extract_24bit	1
+../Core/Src/bsp_hlw8032.c:41:12:HLW8032_CheckSum	3
+../Core/Src/bsp_hlw8032.c:63:13:HLW8032_Calculate	6
+../Core/Src/bsp_hlw8032.c:96:12:HLW8032_ExtractAndParse	2
+../Core/Src/bsp_hlw8032.c:126:6:HLW8032_Init	2
+../Core/Src/bsp_hlw8032.c:143:6:HLW8032_StartReceive	3
+../Core/Src/bsp_hlw8032.c:159:6:HLW8032_ProcessAndStore	2
+../Core/Src/bsp_hlw8032.c:177:17:HLW8032_GetData	1
+../Core/Src/bsp_hlw8032.c:192:6:HLW8032_RxCplt	2

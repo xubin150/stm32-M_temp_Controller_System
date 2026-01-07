@@ -1,0 +1,6 @@
+../Core/Src/bsp_max31855_driver.c:12:9:MAX31855_GetFault	16	static
+../Core/Src/bsp_max31855_driver.c:32:7:MAX31855_GetTemperature	16	static
+../Core/Src/bsp_max31855_driver.c:36:7:MAX31855_GeInternalTemperature	16	static
+../Core/Src/bsp_max31855_driver.c:40:7:MAX31855_GetTemperatureInFahrenheit	24	static
+../Core/Src/bsp_max31855_driver.c:47:7:MAX31855_GeInternalTemperatureInFahrenheit	24	static
+../Core/Src/bsp_max31855_driver.c:54:6:MAX31855_ReadData	32	static

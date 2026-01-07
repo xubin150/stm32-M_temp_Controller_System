@@ -1,0 +1,7 @@
+../Core/Src/bsp_IIC.c:12:6:IIC_delay	8	static
+../Core/Src/bsp_IIC.c:21:6:I2C_Start	8	static
+../Core/Src/bsp_IIC.c:34:6:I2C_Stop	8	static
+../Core/Src/bsp_IIC.c:44:6:Send_Byte	24	static
+../Core/Src/bsp_IIC.c:67:6:I2C_WaitAck	16	static
+../Core/Src/bsp_IIC.c:93:9:I2C_ReceiveByte	16	static
+../Core/Src/bsp_IIC.c:118:6:I2C_send_ac	16	static

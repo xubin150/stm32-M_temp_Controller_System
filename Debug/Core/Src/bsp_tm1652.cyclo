@@ -1,0 +1,5 @@
+../Core/Src/bsp_tm1652.c:48:13:TM1652_SendByte	4
+../Core/Src/bsp_tm1652.c:93:6:TM1652_WriteCommand	2
+../Core/Src/bsp_tm1652.c:97:6:next_cmd	2
+../Core/Src/bsp_tm1652.c:111:6:TM1652_SetControl	2
+../Core/Src/bsp_tm1652.c:132:6:TM1652_SetSegments	3

@@ -1,0 +1,2 @@
+../Core/Src/bsp_AT24C02.c:10:6:AT24_WriteByte	16	static
+../Core/Src/bsp_AT24C02.c:27:9:AT24_ReadByte	32	static

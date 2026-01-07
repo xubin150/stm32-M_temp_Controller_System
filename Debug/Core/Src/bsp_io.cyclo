@@ -1,0 +1,9 @@
+../Core/Src/bsp_io.c:50:12:getKeyIndex	5
+../Core/Src/bsp_io.c:67:10:KEY_Read_State	14
+../Core/Src/bsp_io.c:143:10:KEY_Get_LongPress	5
+../Core/Src/bsp_io.c:169:6:KEY_Reset_LongPress	2
+../Core/Src/bsp_io.c:182:10:Key_Get_ShortPress	3
+../Core/Src/bsp_io.c:203:6:LED_Red_Set	1
+../Core/Src/bsp_io.c:212:6:LED_Green_Set	1
+../Core/Src/bsp_io.c:220:6:Beep_Start	2
+../Core/Src/bsp_io.c:234:6:Beep_Stop	1
