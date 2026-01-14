@@ -1057,7 +1057,7 @@ void Save_Task(void *argument)
 	  // 1. PID 自整定逻辑 (g_autotune_request 由 Key_Task 设置)
 	  if (g_autotune_request)
 	  {
-		char msg[128];
+	/*	char msg[128];
 		snprintf(msg, sizeof(msg), "Starting AutoTune...\r\n");
 		osMessageQueuePut(UartQueueHandle, &msg, 0, pdMS_TO_TICKS(10));
 		// 确保加热已关闭
@@ -1101,7 +1101,7 @@ void Save_Task(void *argument)
 			snprintf(msg, sizeof(msg), "AutoTune ERR: %d. Params NOT SAVED.\r\n", ret);
 			 osMessageQueuePut(UartQueueHandle, &msg, 0, pdMS_TO_TICKS(10));
 			// 失败时保持 g_pid_valid 不变
-			  }
+			  }*/
 		  // 清除请求
 		   g_autotune_request = 0;
 	  }
