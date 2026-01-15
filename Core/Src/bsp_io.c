@@ -214,6 +214,10 @@ void LED_Green_Set(uint8_t on) {
     HAL_GPIO_WritePin(GREEN_LED_PORT, GREEN_LED_PIN, on ? GPIO_PIN_RESET : GPIO_PIN_SET);
 }
 
+void LED_Green_blink(void)
+{
+	 HAL_GPIO_TogglePin(GREEN_LED_PORT, GREEN_LED_PIN);
+}
 /**
  * @brief 启动蜂鸣器
  */

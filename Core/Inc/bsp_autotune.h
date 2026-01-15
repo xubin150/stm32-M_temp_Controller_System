@@ -9,34 +9,50 @@
 #define SRC_BSP_AUTOTUNE_H_
 #include "main.h"
 #include <stdint.h>
+
+typedef enum {
+    AT_MODE_STANDARD = 0,   // 标准 Ziegler-Nichols (0.6 * Ku)
+    AT_MODE_MODERATE,       // 适度超调 (0.33 * Ku)
+    AT_MODE_NO_OVERSHOOT    // 无超调 (0.2 * Ku)
+} AT_CalcMode_t;
+
+typedef enum {
+    AUTOTUNE_IDLE = 0,
+    AUTOTUNE_RUNNING,
+    AUTOTUNE_COMPLETE,
+    AUTOTUNE_FAILED
+} AT_Status;
+
 typedef struct {
-    float Kp;
-    float Ki;
-    float Kd;
-} PID_Params;
+    // 配置参数
+    float Target;           // 目标温度
+    float OutputStep;       // 继电器跳变步长 (如 PWM 为 0-1000, 该值可设为 300)
+    float BaseOutput;       // 继电器基础输出 (如 200)
+    float Hysteresis;       // 滞后带 (防止噪声导致频繁切换, 建议 0.5-1.0)
 
-/**
- * 离线自整定（FOPDT 识别 + 保守 IMC 风格参数计算）
- *
- * read_temp(): 返回当前温度 (°C)
- * set_heater(power): 设置加热功率，范围 0.0 .. 1.0
- *
- * step_power: 施加的阶跃功率变化量 (例如 0.1 表示 +10% 功率)
- * base_power: 施加阶跃前的基准功率 (0..1)
- * duration_ms: 总采样时间（建议至少 30s ~ 120s，取决于热系统）
- *
- * 返回：0 表示成功并写入 params；非 0 表示失败（例如无响应或超时）
- */
-int PID_AutoTune(
-    float (*read_temp)(void),
-    void  (*set_heater)(float),
-    PID_Params *params,
-    float step_power,
-    float base_power,
-    uint32_t duration_ms,
-    float power_max,         // 最大允许功率 (0..1)
-    float max_safe_temp);    // 超温保护阈值 (°C)
+    AT_CalcMode_t CalcMode; // 当前选择的整定计算模式
+    // 运行状态
+    AT_Status Status;
+    int8_t  Direction;      // 当前加热方向: 1-加热, -1-停止
+    uint32_t PeakCount;     // 已检测到的波峰数量
+    uint32_t LastPeakTime;  // 上一次波峰的时间 (ms)
 
-int PID_AutoTune_SSR(PID_Params *out_params, float step_power, float base_power,
-                     uint32_t duration_ms, float power_max, float max_safe_temp);
+    // 测量值
+    float MaxTemp;          // 当前周期内的最高温
+    float MinTemp;          // 当前周期内的最低温
+    float Amplitude;        // 平均振荡幅值
+    float Ku;               // 临界增益
+    float Pu;               // 临界周期 (秒)
+
+    // 结果 (供外部读取)
+    float SuggestedKp;
+    float SuggestedKi;
+    float SuggestedKd;
+} PID_AutotuneTypeDef;
+
+// 初始化自整定结构体
+void PID_Autotune_Init(PID_AutotuneTypeDef *at, float target, float base_out, float step);
+
+// 自整定核心循环 (建议每 100ms-500ms 调用一次)
+float PID_Autotune_Process(PID_AutotuneTypeDef *at, float current_temp, uint32_t tick_ms);
 #endif /* SRC_BSP_AUTOTUNE_H_ */

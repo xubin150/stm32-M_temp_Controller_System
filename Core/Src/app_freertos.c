@@ -113,7 +113,7 @@ PID_HandleTypeDef HeaterPID;
 uint8_t g_pid_valid = 0; // EEPROM 有效标识
 
 /* autotune / save flags  自整定标志位 */
-volatile uint8_t g_autotune_request = 0;
+
 volatile uint8_t g_save_pid_request = 0;
 
 static uint8_t pv_reached_sv = 0;
@@ -140,6 +140,7 @@ volatile uint8_t g_is_sv_adjusting = 0;
 volatile uint8_t g_fault_muted = 0;
 
 extern uint8_t RxFrameCopy[HLW8032_FRAME_SIZE];
+extern PID_AutotuneTypeDef myAT;
 /* USER CODE END Variables */
 /* Definitions for defaultTask */
 osThreadId_t defaultTaskHandle;
@@ -395,7 +396,7 @@ void Temp_Task(void *argument)
 		 }
 
 	 // 3. 检查安全温度
-	 if (filtered_temp > g_setpoint+10) { //超温10摄氏度  报警
+	 if (filtered_temp > g_setpoint+20) { //超温20摄氏度  报警
 		 over_temp_fault = 1;
 	 }
 		 snprintf(msg, sizeof(msg), "Temperature: %.1f C\r\n", filtered_temp);
@@ -480,19 +481,57 @@ void Heat_Task(void *argument)
 	      current_state = g_app_state;
 	      osMutexRelease(xMutexState);
 	  }
-	  if (current_state == STATE_AUTOTUNE_RUNNING) {
+/*	  if (current_state == STATE_AUTOTUNE_RUNNING) {
 	      // Heat_Task 完全放弃控制，由 autotune 专用逻辑接管
 	      nextWakeTime += period;
 	      osDelayUntil(nextWakeTime);
 	      continue;
-	  }
-
+	  }*/
+	  // 获取当前温度
 	  if (osMutexAcquire(xMutexTemp, osWaitForever) == osOK) {
 		  temp = PID_Input_Temperature;
 		  osMutexRelease(xMutexTemp);
 	  }
+
+	  // --- 核心状态机管理 ---
+	  // 模式1: 故障模式优先级最高
+	  if (current_state == STATE_FAULT)
+	  {
+		  set_heater_impl(0);
+		  tpc_counter = 0;
+	   }
+
+	  // 模式2: 自整定模式
+	  else if (current_state == STATE_AUTOTUNE_RUNNING)
+	  {
+		  // 执行自整定逻辑 (继电器反馈)
+		  float at_output = PID_Autotune_Process(&myAT, temp, osKernelGetTickCount());
+
+		  // 直接控制 SSR (自整定通常是开关控制，不需要 TPC)
+		  if (at_output > (myAT.BaseOutput)) set_heater_impl(1);
+		  else set_heater_impl(0);
+
+		  // 检查是否完成
+		  if (myAT.Status == AUTOTUNE_COMPLETE) {
+			  if (osMutexAcquire(xMutexPID, osWaitForever) == osOK) {
+				  // 更新 PID 结构体参数
+				  HeaterPID.Kp = myAT.SuggestedKp;
+				  HeaterPID.Ki = myAT.SuggestedKi;
+				  HeaterPID.Kd = myAT.SuggestedKd;
+				  g_pid_valid = 1;
+				  osMutexRelease(xMutexPID);
+			  }
+			  g_save_pid_request =1 ; //参数保持请求
+			  // 自动切回停止或加热模式
+			  if (osMutexAcquire(xMutexState, osWaitForever) == osOK) {
+				  g_app_state = STATE_OFF;
+				  osMutexRelease(xMutexState);
+			  }
+		  }
+	  }
+	  // 【模式三：正常 PID 加热模式】
 	  // 2. 只有在 HEATING 状态下才执行 PID 逻辑
-	   if (current_state == STATE_HEATING)
+	  else if (current_state == STATE_HEATING)
 	   {
 
 		  // 2.1 安全检查：PID 参数必须有效
@@ -558,13 +597,10 @@ void Heat_Task(void *argument)
 	  else
 	  {
 
-		  // 3. 非 HEATING 状态，关闭加热
-
-          // 排除 STATE_AUTOTUNE_RUNNING 状态，此时加热由 Save_Task 中的自整定逻辑控制。
-	      if (current_state != STATE_AUTOTUNE_RUNNING) {
+		  // 模式四：停止模式
 	          set_heater_impl(0);
 	          tpc_counter = 0; // 重置 TPC
-	      }
+
 	  }
 
 	 nextWakeTime += period;
@@ -637,9 +673,6 @@ void UI_Task(void *argument)
 	static float pv_display = 0.0f;   // 用于显示的温度
 	static float pv_hold = 0.0f;      // 锁定显示温度
 	static uint8_t pv_display_init = 0;
-	static uint8_t pv_hold_active = 0;
-
-
 
 	uint8_t pv_data[4];
 	uint8_t sv_data[4];
@@ -652,6 +685,10 @@ void UI_Task(void *argument)
 	const uint8_t SEG_HEAT[] = {0x76, 0x79, 0x77, 0x78}; // H E A T -> (H, E, A, t)
 	const uint8_t SEG_ATUN[] = {0x77, 0x78, 0x3e, 0x54}; // A T U N -> (A, t, u, n)
 	const uint8_t SEG_BLANK[] = {0x00, 0x00, 0x00, 0x00}; // 全灭
+	// 预定义模式名称的段码
+	const uint8_t SEG_STD[]  = {0x6D, 0x78, 0x5E, 0x00}; // "Std " (S t d)
+	const uint8_t SEG_MID[]  = {0x15, 0x10, 0x5E, 0x00}; // "Mid " (M i d)
+	const uint8_t SEG_SAFE[] = {0x6D, 0x77, 0x71, 0x79}; // "SAFE" (S A F E)
   /* Infinite loop */
   for(;;)
   {
@@ -680,14 +717,13 @@ void UI_Task(void *argument)
 	      pv_hold = pv_temp;
 	      pv_display_init = 1;
 	  }
-	  if(fabsf(pv_temp - sv_temp)>2.5)
+	  if(fabsf(pv_temp - sv_temp)>1)  //大于这个误差不锁定  误差定义1
 		  pv_reached_sv = 0;
   // ====================================================
 	// 2. PV (当前温度/模式) 显示逻辑 - Channel 0
 	// ====================================================
 	switch (current_state) {
 		case STATE_HEAT_READY:
-			pv_hold_active = 0;
 			pv_reached_sv = 0;
 		   // PV 显示 "HEAT"
 		   memcpy(pv_data, SEG_HEAT, 4);
@@ -695,10 +731,16 @@ void UI_Task(void *argument)
 		   LED_Red_Set(0);
 		   break;
 		case STATE_AUTOTUNE_READY:
-			pv_hold_active = 0;
 			pv_reached_sv = 0;
+			// 根据 myAT.CalcMode 显示不同的模式名称
+			switch (myAT.CalcMode) {
+				case AT_MODE_MODERATE:    memcpy(pv_data, SEG_MID, 4);  break;
+				case AT_MODE_NO_OVERSHOOT: memcpy(pv_data, SEG_SAFE, 4); break;
+				case AT_MODE_STANDARD:
+				default:                  memcpy(pv_data, SEG_STD, 4);  break;
+			}
 		   // PV 显示 "ATUN"
-		   memcpy(pv_data, SEG_ATUN, 4);
+		//   memcpy(pv_data, SEG_ATUN, 4);
 
 		   LED_Green_Set(0);
 		   // 红灯闪烁逻辑 (每隔 250ms 切换一次)
@@ -714,10 +756,9 @@ void UI_Task(void *argument)
 		    if (!pv_reached_sv)
 		    {
 		        // 还没到过目标温度
-		        if (abs_err < 0.3f)
+		        if (abs_err < 0.1f)
 		        {
 		            pv_reached_sv = 1;
-		            pv_hold_active = 1;
 		            pv_hold = sv_temp;       // 🔒 锁定显示 SV
 		            pv_display = pv_hold;
 		        }
@@ -738,19 +779,36 @@ void UI_Task(void *argument)
 		    LED_Red_Set(0);
 		    break;
 		}
-
 		case STATE_AUTOTUNE_RUNNING:
-
 		   // 正常显示当前温度
 			pv_reached_sv = 0;
-		   FloatToSegments(pv_temp, pv_data);
-		   LED_Green_Set(1); // 绿色 LED 常亮
+			// --- 自整定进度显示逻辑 ---
+			// 1. 如果还在起步阶段（前 3 次跳变以前），显示实时温度
+			if (myAT.PeakCount < 3)
+			{
+				FloatToSegments(pv_temp, pv_data);
+			}
+			// 2. 进入振荡计算阶段，显示进度
+			else
+			{
+				// 计算当前进度（例如一共要 10 次跳变，现在是第几次）
+				// 我们可以显示格式如: "- 04 -"
+				uint8_t count = (uint8_t)myAT.PeakCount;
+				if (count > 99) count = 99; // 防止溢出
+
+				pv_data[0] = 0x40; // 中间一横 '-'
+				pv_data[1] = TM1652_SegmentMap[count / 10]; // 十位
+				pv_data[2] = TM1652_SegmentMap[count % 10]; // 个位
+				pv_data[3] = 0x40; // 中间一横 '-'
+
+			}
+		   LED_Green_blink();//绿色LED闪烁
+		  // LED_Green_Set(1); // 绿色 LED 常亮
 		   LED_Red_Set(0);
 		   break;
 		case STATE_FAULT:
 		   // 显示温度，红灯常亮 (已经在 Temp_Task 中设置)
 			pv_reached_sv = 0;
-			pv_hold_active = 0;
 			pv_display = pv_temp;
 			FloatToSegments(pv_display, pv_data);
 		   // 可以增加闪烁或显示 "E.rr"
@@ -761,7 +819,7 @@ void UI_Task(void *argument)
 		case STATE_OFF:
 		default:
 		   // 默认：正常显示当前温度
-		   pv_hold_active = 0;
+		  pv_reached_sv = 0;
 		   pv_display = pv_temp;
 		   FloatToSegments(pv_display, pv_data);
 		   LED_Green_Set(0); // 加热关闭，绿灯灭
@@ -845,11 +903,19 @@ void Key_Task(void *argument)
   }
 
   if (current_state == STATE_AUTOTUNE_RUNNING) {
-      // KEY_Task 完全放弃控制，由 autotune 专用逻辑接管
-      nextWakeTime += period;
-      osDelayUntil(nextWakeTime);
-      continue;
+      // 自整定运行中，如果按下 Menu 键，则视为取消
+      if (Key_Get_ShortPress(KEY_MENU)) {
+          if (osMutexAcquire(xMutexState, 5) == osOK) {
+              g_app_state = STATE_OFF; // 强行拉回 OFF 状态
+              myAT.Status = AUTOTUNE_IDLE; // 重置算法状态
+              osMutexRelease(xMutexState);
+              Beep_Start();
+          }
+      }
+      // 自整定期间，不响应其他按键（如调温），直接跳转延时
+      goto delay_and_continue;
   }
+
 
   //  故障和自整定状态下的按键处理
   if (current_state == STATE_FAULT) {
@@ -878,19 +944,6 @@ void Key_Task(void *argument)
  	  // 其他按键在故障模式下被忽略
  	  goto delay_and_continue;
    }
-/*  if (current_state == STATE_AUTOTUNE_RUNNING) {
-	  // 自整定模式下：短按 Menu 退出自整定
-	  if (Key_Get_ShortPress(KEY_MENU)) {
-	      if (osMutexAcquire(xMutexState, 5) == osOK) {
-	          g_app_state = STATE_OFF; // 退出到 OFF 状态
-	          osMutexRelease(xMutexState);
-	          g_autotune_request = 0; // 终止自整定任务
-	          Beep_Start();
-	      }
-	  }
-	  // 其它按键在自整定运行时被忽略
-	  goto delay_and_continue;
-  }*/
 
   // 4. 状态切换逻辑 (Menu/长按Menu)
   if (key_states & KEY_MENU) {
@@ -1020,9 +1073,12 @@ void Key_Task(void *argument)
 			   Beep_Start();
 			   break;
 		   case STATE_AUTOTUNE_READY:
-			   // 启动自整定（由 Save_Task 负责执行）
+			   // 启动自整定
+			   // 1. 在这里调用初始化函数 (建议参数：目标值, 基准100%, 扰动100%)
+			   // 这里的 0.3f 对应 30% 的功率偏移
+			   PID_Autotune_Init(&myAT, g_setpoint, 1.0f, 1.0f);
+			   // 2. 切换状态
 			   g_app_state = STATE_AUTOTUNE_RUNNING;
-			   g_autotune_request = 1;
 			   Beep_Start();
 			   break;
 		   default:
@@ -1032,6 +1088,17 @@ void Key_Task(void *argument)
 	   osMutexRelease(xMutexState);
    }
  }
+ // 7. 新增：在 AUTOTUNE_READY 下切换整定计算模式
+ if (current_state == STATE_AUTOTUNE_READY) {
+             if (Key_Get_ShortPress(KEY_UP)) {
+                 myAT.CalcMode = (AT_CalcMode_t)((myAT.CalcMode + 1) % 3);
+                 Beep_Start();
+             } else if (Key_Get_ShortPress(KEY_DOWN)) {
+                 myAT.CalcMode = (AT_CalcMode_t)((myAT.CalcMode + 2) % 3);
+                 Beep_Start();
+             }
+         }
+
 	// 7. 延时
 	delay_and_continue:
 	nextWakeTime += period;
@@ -1054,57 +1121,6 @@ void Save_Task(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	  // 1. PID 自整定逻辑 (g_autotune_request 由 Key_Task 设置)
-	  if (g_autotune_request)
-	  {
-	/*	char msg[128];
-		snprintf(msg, sizeof(msg), "Starting AutoTune...\r\n");
-		osMessageQueuePut(UartQueueHandle, &msg, 0, pdMS_TO_TICKS(10));
-		// 确保加热已关闭
-		set_heater_impl(0);
-		osDelay(pdMS_TO_TICKS(200));// 延迟确保继电器关闭
-		PID_Params newparams;
-		int ret = PID_AutoTune_SSR(&newparams,
-		                                     0.15f,   // step power (+15%)
-		                                     0.05f,   // base power (5%)
-		                                     30000,   // 60000duration_ms = 60s
-		                                     1.0f,    // power_max (100%)
-		                                     MAX_SAFE_TEMP_C);
-	    // 自整定完成
-	    if (osMutexAcquire(xMutexState, osWaitForever) == osOK) {
-	        // 无论是成功还是失败，都退出 Autotune 状态，进入 OFF
-	        g_app_state = STATE_OFF;
-	        osMutexRelease(xMutexState);
-	    }
-
-		if (ret == 0)
-		{
-		  // 保存到 EEPROM
-		  // 将参数写入到全局 HeaterPID 并生效
-		  if (osMutexAcquire(xMutexPID, osWaitForever) == osOK) {
-			  HeaterPID.Kp = newparams.Kp;
-			  HeaterPID.Ki = newparams.Ki;
-			  HeaterPID.Kd = newparams.Kd;
-			  // 重新初始化 PID 内部变量（防止历史积分影响）
-			  PID_Init(&HeaterPID, HeaterPID.Kp, HeaterPID.Ki, HeaterPID.Kd, 0.0f, 1.0f);
-			  osMutexRelease(xMutexPID);
-		  }
-		  // 成功后，也需要保存参数和当前的 g_setpoint
-		  g_save_pid_request = 1;
-		  g_pid_valid = 1;
-		  snprintf(msg, sizeof(msg), "AutoTune OK. Kp=%.3f Ki=%.6f Kd=%.3f\r\n",
-					newparams.Kp, newparams.Ki, newparams.Kd);
-		  osMessageQueuePut(UartQueueHandle, &msg, 0, pdMS_TO_TICKS(10));
-
-		}
-		else {
-			snprintf(msg, sizeof(msg), "AutoTune ERR: %d. Params NOT SAVED.\r\n", ret);
-			 osMessageQueuePut(UartQueueHandle, &msg, 0, pdMS_TO_TICKS(10));
-			// 失败时保持 g_pid_valid 不变
-			  }*/
-		  // 清除请求
-		   g_autotune_request = 0;
-	  }
 	  // 2. PID/SV 参数保存逻辑 (g_save_pid_request 由 Key_Task 或 Autotune 成功设置)
 	  if (g_save_pid_request) {
 

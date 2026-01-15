@@ -74,6 +74,7 @@ void LED_Red_Set(uint8_t on);
  */
 void LED_Green_Set(uint8_t on);
 
+void LED_Green_blink(void);
 /**
  * @brief 启动蜂鸣器
  * @note (发送信号给 Beep_Task)。

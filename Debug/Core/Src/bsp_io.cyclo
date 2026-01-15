@@ -5,5 +5,6 @@
 ../Core/Src/bsp_io.c:182:10:Key_Get_ShortPress	3
 ../Core/Src/bsp_io.c:203:6:LED_Red_Set	1
 ../Core/Src/bsp_io.c:212:6:LED_Green_Set	1
-../Core/Src/bsp_io.c:220:6:Beep_Start	2
-../Core/Src/bsp_io.c:234:6:Beep_Stop	1
+../Core/Src/bsp_io.c:217:6:LED_Green_blink	1
+../Core/Src/bsp_io.c:224:6:Beep_Start	2
+../Core/Src/bsp_io.c:238:6:Beep_Stop	1

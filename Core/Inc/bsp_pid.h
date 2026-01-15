@@ -15,6 +15,8 @@ typedef struct {
     float Kp;           // 比例增益 (Proportional Gain)
     float Ki;           // 积分增益 (Integral Gain)
     float Kd;           // 微分增益 (Derivative Gain)
+
+
     float prev_error;   // 上一次的误差值 (e[k-1])，用于计算微分项
     float prev_measurement;
     float integral;     // 积分累加值，用于计算积分项
