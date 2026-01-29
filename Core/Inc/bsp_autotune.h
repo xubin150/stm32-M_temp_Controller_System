@@ -44,6 +44,8 @@ typedef struct {
     float Ku;               // 临界增益
     float Pu;               // 临界周期 (秒)
 
+    int8_t LastDirection; //加热/停止加热方向
+
     // 结果 (供外部读取)
     float SuggestedKp;
     float SuggestedKi;

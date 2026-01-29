@@ -34,6 +34,7 @@ void PID_Autotune_Init(PID_AutotuneTypeDef *at, float target, float base_out, fl
     at->Status = AUTOTUNE_RUNNING;
     at->Direction = 0;
     at->PeakCount = 0;
+    at->LastDirection = 0;
     at->MaxTemp = -999.0f;
     at->MinTemp = 999.0f;
     at->LastPeakTime = 0;
@@ -69,12 +70,7 @@ float PID_Autotune_Process(PID_AutotuneTypeDef *at, float current_temp, uint32_t
     if (current_temp > at->MaxTemp) at->MaxTemp = current_temp;
     if (current_temp < at->MinTemp) at->MinTemp = current_temp;
 
-    // 当加热方向切换时，说明经过了一个波峰或波谷
-    static int8_t last_dir = 0;
-    // 这里采用检测 PeakCount 为 0 时强制同步方向。
-    if (at->PeakCount == 0) last_dir = at->Direction;
-
-    if (last_dir != at->Direction) {
+    if (at->LastDirection != at->Direction && at->Direction != 0) {
         at->PeakCount++;
 
         /* * 逻辑调整：
@@ -100,13 +96,15 @@ float PID_Autotune_Process(PID_AutotuneTypeDef *at, float current_temp, uint32_t
                     else at->Amplitude = at->Amplitude * 0.4f + current_amp * 0.6f;
                 }
             }
-            // 重要：每次方向切换时，都要更新参考时间并重置极值记录
-            at->LastPeakTime = tick_ms;
-            at->MaxTemp = current_temp; // 重置为当前温度，开始下一半波的寻优
-            at->MinTemp = current_temp;
-        }
 
-        last_dir = at->Direction;
+        }
+        // 重要：每次方向切换时，都要更新参考时间并重置极值记录
+        at->LastPeakTime = tick_ms;
+        at->MaxTemp = current_temp; // 重置为当前温度，开始下一半波的寻优
+        at->MinTemp = current_temp;
+
+       // last_dir = at->Direction;
+        at->LastDirection = at->Direction;
     }
 
     // 3. 停止条件: 记录足够多的稳定周期
@@ -114,7 +112,7 @@ float PID_Autotune_Process(PID_AutotuneTypeDef *at, float current_temp, uint32_t
     if (at->PeakCount >= 10 && at->Amplitude > 0.1f) {
         // 计算 Ku = 4d / (pi * A)
         at->Ku = (4.0f * at->OutputStep) / (M_PI * at->Amplitude);
-
+        at->Ku =  at->Ku * 1 ;// 系数修正
         // 定义不同模式下的系数 (Coefficients)
 		float kp_coeff = 0.6f;
 		float ti_coeff = 0.5f;

@@ -274,9 +274,10 @@ void MX_FREERTOS_Init(void) {
 			// 假设默认目标温度为 100
 			g_setpoint = 100.0f;
 		}
-	    HeaterPID.Kp = 0.12;   // 参数P  //300W功率加热棒 目标温度150 ，145度时功率明显下降
-	    HeaterPID.Ki = 0.0006;  // 参数I 0.002超温3度，且来回震荡  ->调小 振幅减小
-	    HeaterPID.Kd = 0.025; //
+	  //  HeaterPID.Kp = 0.12;   // 参数P  //300W功率加热棒 目标温度150 ，145度时功率明显下降
+	//    HeaterPID.Ki = 0.0006;  // 参数I 0.002超温3度，且来回震荡  ->调小 振幅减小
+	//    HeaterPID.Kd = 0.025; //
+
 	    // 0.12  0.0008  0.02 处于轻微振荡状态 处于切阻尼
 	    // 0.12 0.0006 0.025 温度会回落1度左右，然后缓慢升到目标温度 目标温度较高时需要很长时间到达目标温度
 
@@ -472,6 +473,7 @@ void Heat_Task(void *argument)
 	AppState_t current_state;
 	static uint8_t tpc_counter = 0;
 	static uint8_t target_on_steps = 0;
+	static uint8_t is_tuned_initialized = 0; // 用于标记自整定算法是否已就绪
   /* Infinite loop */
   for(;;)
   {
@@ -502,32 +504,62 @@ void Heat_Task(void *argument)
 	   }
 
 	  // 模式2: 自整定模式
+
 	  else if (current_state == STATE_AUTOTUNE_RUNNING)
 	  {
-		  // 执行自整定逻辑 (继电器反馈)
-		  float at_output = PID_Autotune_Process(&myAT, temp, osKernelGetTickCount());
-
-		  // 直接控制 SSR (自整定通常是开关控制，不需要 TPC)
-		  if (at_output > (myAT.BaseOutput)) set_heater_impl(1);
-		  else set_heater_impl(0);
-
-		  // 检查是否完成
-		  if (myAT.Status == AUTOTUNE_COMPLETE) {
-			  if (osMutexAcquire(xMutexPID, osWaitForever) == osOK) {
-				  // 更新 PID 结构体参数
-				  HeaterPID.Kp = myAT.SuggestedKp;
-				  HeaterPID.Ki = myAT.SuggestedKi;
-				  HeaterPID.Kd = myAT.SuggestedKd;
-				  g_pid_valid = 1;
-				  osMutexRelease(xMutexPID);
+		  if(is_tuned_initialized==0&&temp<(g_setpoint-5.0)) //当前温度<目标温度5℃
+		  {
+			  // --- 阶段 A: 全功率预热 ---
+			  set_heater_impl(1);
+			  tpc_counter = 0; // 保持 100% 输出
+			  is_tuned_initialized = 0; // 只要还在预热，就标记为未初始化
+		  }
+		  else
+		  {
+			  if(is_tuned_initialized==0)
+			  {
+				  tpc_counter = 0;
+				   is_tuned_initialized = 1; // 锁定在振荡阶段
 			  }
-			  g_save_pid_request =1 ; //参数保持请求
-			  // 自动切回停止或加热模式
-			  if (osMutexAcquire(xMutexState, osWaitForever) == osOK) {
-				  g_app_state = STATE_OFF;
-				  osMutexRelease(xMutexState);
+
+		  // 1. 获取自整定算法的决策
+			  float at_output = PID_Autotune_Process(&myAT, temp, osKernelGetTickCount());
+
+			  // 2. 将自整定输出转化为 TPC 目标步数
+			  // at_output 会在 (BaseOutput + OutputStep) 和 (BaseOutput - OutputStep) 之间切换
+			  // 假设 BaseOutput = 0.3 (30%), OutputStep = 0.3 (20%)
+			  // 则系统在 50% 功率和 10% 功率之间切换
+			  if (tpc_counter == 0)
+			  {
+				  target_on_steps = (uint8_t)(at_output * TPC_STEPS + 0.5f);
+				  if (target_on_steps > TPC_STEPS) target_on_steps = TPC_STEPS;
+			  }
+
+			  // 3. TPC 输出控制
+				  if(tpc_counter < target_on_steps) set_heater_impl(1);
+				  else set_heater_impl(0);
+			  // 4. 更新计数器 (公用 TPC 逻辑)
+				  tpc_counter++;
+				  if(tpc_counter >= TPC_STEPS) tpc_counter = 0;
+			  // 检查是否完成
+			  if (myAT.Status == AUTOTUNE_COMPLETE) {
+				  if (osMutexAcquire(xMutexPID, osWaitForever) == osOK) {
+					  // 更新 PID 结构体参数
+					  HeaterPID.Kp = myAT.SuggestedKp;
+					  HeaterPID.Ki = myAT.SuggestedKi;
+					  HeaterPID.Kd = myAT.SuggestedKd;
+					  g_pid_valid = 1;
+					  osMutexRelease(xMutexPID);
+				  }
+				  g_save_pid_request =1 ; //参数保持请求
+				  // 自动切回停止或加热模式
+				  if (osMutexAcquire(xMutexState, osWaitForever) == osOK) {
+					  g_app_state = STATE_OFF;
+					  osMutexRelease(xMutexState);
+				  }
 			  }
 		  }
+
 	  }
 	  // 【模式三：正常 PID 加热模式】
 	  // 2. 只有在 HEATING 状态下才执行 PID 逻辑
@@ -683,7 +715,7 @@ void UI_Task(void *argument)
 	uint8_t is_sv_adjusting = 0; // 局部变量
 	// 模式文字 "HEAT" (H E A t) 和 "ATUN" (A t u n) 的段码定义
 	const uint8_t SEG_HEAT[] = {0x76, 0x79, 0x77, 0x78}; // H E A T -> (H, E, A, t)
-	const uint8_t SEG_ATUN[] = {0x77, 0x78, 0x3e, 0x54}; // A T U N -> (A, t, u, n)
+//	const uint8_t SEG_ATUN[] = {0x77, 0x78, 0x3e, 0x54}; // A T U N -> (A, t, u, n)
 	const uint8_t SEG_BLANK[] = {0x00, 0x00, 0x00, 0x00}; // 全灭
 	// 预定义模式名称的段码
 	const uint8_t SEG_STD[]  = {0x6D, 0x78, 0x5E, 0x00}; // "Std " (S t d)
@@ -717,7 +749,7 @@ void UI_Task(void *argument)
 	      pv_hold = pv_temp;
 	      pv_display_init = 1;
 	  }
-	  if(fabsf(pv_temp - sv_temp)>1)  //大于这个误差不锁定  误差定义1
+	  if(fabsf(pv_temp - sv_temp)>0.6)  //大于这个误差不锁定  误差定义0.6
 		  pv_reached_sv = 0;
   // ====================================================
 	// 2. PV (当前温度/模式) 显示逻辑 - Channel 0
@@ -804,7 +836,7 @@ void UI_Task(void *argument)
 			}
 		   LED_Green_blink();//绿色LED闪烁
 		  // LED_Green_Set(1); // 绿色 LED 常亮
-		   LED_Red_Set(0);
+		   LED_Red_Set(1);
 		   break;
 		case STATE_FAULT:
 		   // 显示温度，红灯常亮 (已经在 Temp_Task 中设置)
@@ -902,19 +934,22 @@ void Key_Task(void *argument)
 	  osMutexRelease(xMutexState);
   }
 
-  if (current_state == STATE_AUTOTUNE_RUNNING) {
-      // 自整定运行中，如果按下 Menu 键，则视为取消
-      if (Key_Get_ShortPress(KEY_MENU)) {
-          if (osMutexAcquire(xMutexState, 5) == osOK) {
-              g_app_state = STATE_OFF; // 强行拉回 OFF 状态
-              myAT.Status = AUTOTUNE_IDLE; // 重置算法状态
-              osMutexRelease(xMutexState);
-              Beep_Start();
-          }
-      }
-      // 自整定期间，不响应其他按键（如调温），直接跳转延时
-      goto delay_and_continue;
+  if(key_states & KEY_MENU){
+	  if (current_state == STATE_AUTOTUNE_RUNNING) {
+	        // 自整定运行中，如果按下 Menu 键，则视为取消
+	        if (Key_Get_ShortPress(KEY_MENU)) {
+	            if (osMutexAcquire(xMutexState, 5) == osOK) {
+	                g_app_state = STATE_OFF; // 强行拉回 OFF 状态
+	                myAT.Status = AUTOTUNE_IDLE; // 重置算法状态
+	                osMutexRelease(xMutexState);
+	                Beep_Start();
+	            }
+	        }
+	        // 自整定期间，不响应其他按键（如调温），直接跳转延时
+	        goto delay_and_continue;
+	    }
   }
+
 
 
   //  故障和自整定状态下的按键处理
@@ -1074,9 +1109,9 @@ void Key_Task(void *argument)
 			   break;
 		   case STATE_AUTOTUNE_READY:
 			   // 启动自整定
-			   // 1. 在这里调用初始化函数 (建议参数：目标值, 基准100%, 扰动100%)
+			   // 1. 在这里调用初始化函数 (建议参数：目标值, 基准24%, 扰动24%)
 			   // 这里的 0.3f 对应 30% 的功率偏移
-			   PID_Autotune_Init(&myAT, g_setpoint, 1.0f, 1.0f);
+			   PID_Autotune_Init(&myAT, g_setpoint, 0.24f, 0.24f);
 			   // 2. 切换状态
 			   g_app_state = STATE_AUTOTUNE_RUNNING;
 			   Beep_Start();
