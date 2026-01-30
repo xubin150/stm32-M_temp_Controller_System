@@ -1110,7 +1110,8 @@ void Key_Task(void *argument)
 			   break;
 		   case STATE_AUTOTUNE_READY:
 			   // 启动自整定
-			   // 1. 在这里调用初始化函数 (建议参数：目标值, 基准24%, 扰动24%)
+			   // 1. 在这里调用初始化函数 (建议参数：目标值, 基准24%, 扰动24%) -整定温度小于120  at->Ku =  at->Ku * 2 ;// 系数修正
+			   // 基准40% 扰动40%    at->Ku =  at->Ku * 1.33333 ;// 系数修正
 			   // 这里的 0.3f 对应 30% 的功率偏移
 			   PID_Autotune_Init(&myAT, g_setpoint, 0.24f, 0.24f);
 			   // 2. 切换状态

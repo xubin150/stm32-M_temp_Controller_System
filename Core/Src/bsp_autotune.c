@@ -121,10 +121,12 @@ float PID_Autotune_Process(PID_AutotuneTypeDef *at, float current_temp, uint32_t
 	switch (at->CalcMode) {
 		case AT_MODE_MODERATE: // 适度超调 (Pessen Integral Rule 变体)
 			kp_coeff = 0.33f; // 约为标准值的 1/2~1/3
+
 			break;
 
 		case AT_MODE_NO_OVERSHOOT: // 无超调 (Tyreus-Luyben 变体)
-			kp_coeff = 0.20f; // 约为标准值的 1/3
+			//kp_coeff = 0.20f; // 约为标准值的 1/3
+			kp_coeff = 0.33f; //使用适度超调的参数  ->对于大迟滞温控系统很难不超调
 			break;
 
 		case AT_MODE_STANDARD:
