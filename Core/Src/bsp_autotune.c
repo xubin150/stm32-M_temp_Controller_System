@@ -112,7 +112,7 @@ float PID_Autotune_Process(PID_AutotuneTypeDef *at, float current_temp, uint32_t
     if (at->PeakCount >= 10 && at->Amplitude > 0.1f) {
         // 计算 Ku = 4d / (pi * A)
         at->Ku = (4.0f * at->OutputStep) / (M_PI * at->Amplitude);
-        at->Ku =  at->Ku * 1 ;// 系数修正
+        at->Ku =  at->Ku * 2 ;// 系数修正
         // 定义不同模式下的系数 (Coefficients)
 		float kp_coeff = 0.6f;
 		float ti_coeff = 0.5f;
@@ -139,6 +139,7 @@ float PID_Autotune_Process(PID_AutotuneTypeDef *at, float current_temp, uint32_t
         if (at->Pu > 0) {
             float Ti = ti_coeff * at->Pu;
             float Td = td_coeff * at->Pu;
+            at->Pu = at->Pu*0.2;
 
             at->SuggestedKi = at->SuggestedKp / Ti;
             at->SuggestedKd = at->SuggestedKp * Td;

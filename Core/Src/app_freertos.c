@@ -274,6 +274,7 @@ void MX_FREERTOS_Init(void) {
 			// 假设默认目标温度为 100
 			g_setpoint = 100.0f;
 		}
+	//  HeaterPID.Kp  *=2;
 	  //  HeaterPID.Kp = 0.12;   // 参数P  //300W功率加热棒 目标温度150 ，145度时功率明显下降
 	//    HeaterPID.Ki = 0.0006;  // 参数I 0.002超温3度，且来回震荡  ->调小 振幅减小
 	//    HeaterPID.Kd = 0.025; //
@@ -749,7 +750,7 @@ void UI_Task(void *argument)
 	      pv_hold = pv_temp;
 	      pv_display_init = 1;
 	  }
-	  if(fabsf(pv_temp - sv_temp)>0.6)  //大于这个误差不锁定  误差定义0.6
+	  if(fabsf(pv_temp - sv_temp)>0.1)  //大于这个误差不锁定  误差定义0.6
 		  pv_reached_sv = 0;
   // ====================================================
 	// 2. PV (当前温度/模式) 显示逻辑 - Channel 0
